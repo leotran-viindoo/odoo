@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from openerp.addons.website_forum.tests.common import KARMA, TestForumCommon
-from openerp.addons.website_forum.models.forum import KarmaError
+from .common import KARMA, TestForumCommon
+from ..models.forum import KarmaError
 from openerp.exceptions import UserError, AccessError
 from openerp.tools import mute_logger
 
@@ -32,7 +32,7 @@ class TestForum(TestForumCommon):
         Post.sudo(self.user_portal).create({
             'name': " Q0",
             'forum_id': self.forum.id,
-            'tag_ids': [(0, 0, {'name': 'Tag0', 'forum_id': self.forum.id})]
+            'tag_ids': [(0, 0, {'name': 'Tag1', 'forum_id': self.forum.id})]
         })
         self.assertEqual(self.user_portal.karma, KARMA['ask'] + KARMA['gen_que_new'], 'website_forum: wrong karma generation when asking question')
 
@@ -105,12 +105,12 @@ class TestForum(TestForumCommon):
 
     def test_comment_crash(self):
         with self.assertRaises(KarmaError):
-            self.post.sudo(self.user_portal).message_post(body='Should crash', type='comment')
+            self.post.sudo(self.user_portal).message_post(body='Should crash', message_type='comment')
 
     def test_comment(self):
-        self.post.sudo(self.user_employee).message_post(body='Test0', type='notification')
+        self.post.sudo(self.user_employee).message_post(body='Test0', message_type='notification')
         self.user_employee.karma = KARMA['com_all']
-        self.post.sudo(self.user_employee).message_post(body='Test1', type='comment')
+        self.post.sudo(self.user_employee).message_post(body='Test1', message_type='comment')
         self.assertEqual(len(self.post.message_ids), 4, 'website_forum: wrong behavior of message_post')
 
     def test_convert_answer_to_comment_crash(self):

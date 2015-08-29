@@ -60,7 +60,7 @@
                             </group>
                         </group>
                         <group class="oe_subtotal_footer oe_right">
-                            <field name="amount_total"/>
+                            <field name="amount_total" widget="monetary"/>
                         </group>
                         <group>
                             <group>
@@ -91,7 +91,7 @@
                                         <field name="weight" readonly="1"/>
                                         <field name="volume" readonly="1"/>
                                         <field name="quantity" readonly="1"/>
-                                        <field name="former_cost_per_unit" readonly="1"/>
+                                        <field name="former_cost_per_unit" readonly="1" widget="monetary"/>
                                         <field name="former_cost" readonly="1"/>
                                         <field name="additional_landed_cost"/>
                                     </tree>
@@ -164,7 +164,7 @@
             <field name="arch" type="xml">
                 <form string="Landed Costs">
                     <sheet>
-                        <field name="image_medium" widget="image" class="oe_avatar oe_left"/>
+                        <field name="image_medium" widget="image" class="oe_avatar"/>
                         <div class="oe_title">
                             <div class="oe_edit_only">
                                 <label for="name" name='label_name' string="Product Name"/>
@@ -189,7 +189,7 @@
                                     <group>
                                         <field name="split_method"/>
                                         <field name="standard_price"/>
-                                        <field name="property_account_expense"/>
+                                        <field name="property_account_expense_id"/>
                                     </group>
                                     <group>
                                         <field name="company_id" groups="base.group_multi_company" options="{'no_create': True}"/>

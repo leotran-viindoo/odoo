@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2009 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 """ Fields:
       - simple
@@ -43,6 +25,7 @@ import pytz
 import re
 import xmlrpclib
 from operator import itemgetter
+from contextlib import contextmanager
 from psycopg2 import Binary
 
 import openerp
@@ -51,6 +34,23 @@ from openerp.tools.translate import _
 from openerp.tools import float_repr, float_round, frozendict, html_sanitize
 import simplejson
 from openerp import SUPERUSER_ID, registry
+
+@contextmanager
+def _get_cursor():
+    # yield a valid cursor from any environment or create a new one if none found
+    from openerp.api import Environment
+    from openerp.http import request
+    try:
+        request.env     # force request's env to be computed
+    except RuntimeError:
+        pass    # ignore if not in a request
+    for env in Environment.envs:
+        if not env.cr.closed:
+            yield env.cr
+            break
+    else:
+        with registry().cursor() as cr:
+            yield cr
 
 EMPTY_DICT = frozendict()
 
@@ -151,6 +151,8 @@ class _column(object):
 
     def __getattr__(self, name):
         """ Access a non-slot attribute. """
+        if name == '_args':
+            raise AttributeError(name)
         try:
             return self._args[name]
         except KeyError:
@@ -185,14 +187,12 @@ class _column(object):
     def to_field(self):
         """ convert column `self` to a new-style field """
         from openerp.fields import Field
-        return Field.by_type[self._type](column=self, **self.to_field_args())
+        return Field.by_type[self._type](origin=self, **self.to_field_args())
 
     def to_field_args(self):
         """ return a dictionary with all the arguments to pass to the field """
         base_items = [
             ('copy', self.copy),
-        ]
-        truthy_items = filter(itemgetter(1), [
             ('index', self.select),
             ('manual', self.manual),
             ('string', self.string),
@@ -203,6 +203,8 @@ class _column(object):
             ('groups', self.groups),
             ('change_default', self.change_default),
             ('deprecated', self.deprecated),
+        ]
+        truthy_items = filter(itemgetter(1), [
             ('group_operator', self.group_operator),
             ('size', self.size),
             ('ondelete', self.ondelete),
@@ -386,7 +388,7 @@ class float(_column):
     @property
     def digits(self):
         if self._digits_compute:
-            with registry().cursor() as cr:
+            with _get_cursor() as cr:
                 return self._digits_compute(cr)
         else:
             return self._digits
@@ -942,16 +944,16 @@ class many2many(_column):
     def _get_query_and_where_params(self, cr, model, ids, values, where_params):
         """ Extracted from ``get`` to facilitate fine-tuning of the generated
             query. """
-        query = 'SELECT %(rel)s.%(id2)s, %(rel)s.%(id1)s \
-                   FROM %(rel)s, %(from_c)s \
-                  WHERE %(rel)s.%(id1)s IN %%s \
-                    AND %(rel)s.%(id2)s = %(tbl)s.id \
-                 %(where_c)s  \
-                 %(order_by)s \
-                 %(limit)s \
-                 OFFSET %(offset)d' \
-                 % values
-        return query, where_params
+        query = """SELECT %(rel)s.%(id2)s, %(rel)s.%(id1)s
+                     FROM %(rel)s, %(from_c)s
+                    WHERE %(where_c)s
+                      AND %(rel)s.%(id1)s IN %%s
+                      AND %(rel)s.%(id2)s = %(tbl)s.id
+                      %(order_by)s
+                      %(limit)s
+                   OFFSET %(offset)d
+                """ % values
+        return query, where_params + [tuple(ids)]
 
     def get(self, cr, model, ids, name, user=None, offset=0, context=None, values=None):
         if not context:
@@ -977,28 +979,31 @@ class many2many(_column):
 
         wquery = obj._where_calc(cr, user, domain, context=context)
         obj._apply_ir_rules(cr, user, wquery, 'read', context=context)
+        order_by = obj._generate_order_by(cr, user, None, wquery, context=context)
         from_c, where_c, where_params = wquery.get_sql()
-        if where_c:
-            where_c = ' AND ' + where_c
-
-        order_by = ' ORDER BY "%s".%s' %(obj._table, obj._order.split(',')[0])
+        if not where_c:
+            where_c = '1=1'
 
         limit_str = ''
         if self._limit is not None:
             limit_str = ' LIMIT %d' % self._limit
 
-        query, where_params = self._get_query_and_where_params(cr, model, ids, {'rel': rel,
-               'from_c': from_c,
-               'tbl': obj._table,
-               'id1': id1,
-               'id2': id2,
-               'where_c': where_c,
-               'limit': limit_str,
-               'order_by': order_by,
-               'offset': offset,
-                }, where_params)
+        query_parts = {
+            'rel': rel,
+            'from_c': from_c,
+            'tbl': obj._table,
+            'id1': id1,
+            'id2': id2,
+            'where_c': where_c,
+            'limit': limit_str,
+            'order_by': order_by,
+            'offset': offset,
+        }
+        query, where_params = self._get_query_and_where_params(cr, model, ids,
+                                                               query_parts,
+                                                               where_params)
 
-        cr.execute(query, [tuple(ids),] + where_params)
+        cr.execute(query, where_params)
         for r in cr.fetchall():
             res[r[1]].append(r[0])
         return res
@@ -1058,6 +1063,8 @@ def get_nice_size(value):
         size = value
     elif value: # this is supposed to be a string
         size = len(value)
+        if size < 12:  # suppose human size
+            return value
     return tools.human_size(size)
 
 # See http://www.w3.org/TR/2000/REC-xml-20001006#NT-Char
@@ -1316,7 +1323,7 @@ class function(_column):
     @property
     def digits(self):
         if self._digits_compute:
-            with registry().cursor() as cr:
+            with _get_cursor() as cr:
                 return self._digits_compute(cr)
         else:
             return self._digits
@@ -1580,6 +1587,8 @@ class sparse(function):
         """
 
         if self._type == 'many2many':
+            if not value:
+                return []
             assert value[0][0] == 6, 'Unsupported m2m value for sparse field: %s' % value
             return value[0][2]
 

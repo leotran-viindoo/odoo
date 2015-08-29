@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 from openerp.osv import fields, osv
 
 class account_analytic_chart(osv.osv_memory):
@@ -35,7 +17,7 @@ class account_analytic_chart(osv.osv_memory):
         result_context = {}
         if context is None:
             context = {}
-        result = mod_obj.get_object_reference(cr, uid, 'analytic', 'action_account_analytic_account_tree2')
+        result = mod_obj.get_object_reference(cr, uid, 'analytic', 'action_analytic_account_form')
         id = result and result[1] or False
         result = act_obj.read(cr, uid, [id], context=context)[0]
         data = self.read(cr, uid, ids, [])[0]

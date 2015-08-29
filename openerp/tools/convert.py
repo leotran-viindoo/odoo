@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2009 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import cStringIO
 import csv
@@ -538,6 +520,7 @@ form: module.record_id""" % (xml_id,)
             # determine the type of action
             action_type, action_id = self.model_id_get(cr, a_action)
             action_type = action_type.split('.')[-1] # keep only type part
+            values['action'] = "ir.actions.%s,%d" % (action_type, action_id)
 
             if not values.get('name') and action_type in ('act_window', 'wizard', 'url', 'client', 'server'):
                 a_table = 'ir_act_%s' % action_type.replace('act_', '')
@@ -566,23 +549,14 @@ form: module.record_id""" % (xml_id,)
             values['groups_id'] = groups_value
 
         if not values.get('parent_id'):
-            if rec.get('icon'):
-                values['icon'] = rec.get('icon')
-            else:
-                default_icon = 'fa-cube' # default icon if not specified any for top-level menu
-                try:
-                    values['icon'] = self.pool.get('ir.ui.menu').read(cr,self.uid,res,['icon'])[0].get('icon')
-                except:
-                    values['icon'] = default_icon
+            if rec.get('web_icon'):
+                values['web_icon'] = rec.get('web_icon')
 
         pid = self.pool['ir.model.data']._update(cr, self.uid, 'ir.ui.menu', self.module, values, rec_id, noupdate=self.isnoupdate(data_node), mode=self.mode, res_id=res and res[0] or False)
 
         if rec_id and pid:
             self.idref[rec_id] = int(pid)
 
-        if rec.get('action') and pid:
-            action = "ir.actions.%s,%d" % (action_type, action_id)
-            self.pool['ir.model.data'].ir_set(cr, self.uid, 'action', 'tree_but_open', 'Menuitem', [('ir.ui.menu', int(pid))], action, True, True, xml_id=rec_id)
         return 'ir.ui.menu', pid
 
     def _assert_equals(self, f1, f2, prec=4):

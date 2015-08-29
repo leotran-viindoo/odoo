@@ -1,23 +1,5 @@
 # -*- encoding: utf-8 -*-
-##############################################################################
-#
-#    Odoo, Open Source Business Applications
-#    Copyright (C) 2014-2015 Odoo S.A. <http://www.odoo.com>
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program. If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import base64
 import xml.etree.ElementTree as ET
@@ -328,18 +310,18 @@ class xml_decl(osv.TransientModel):
                 amount = inv_line.price_unit * inv_line.quantity
             else:
                 amount = 0
-            if (not inv_line.uos_id.category_id
+            if (not inv_line.uom_id.category_id
                     or not inv_line.product_id.uom_id.category_id
                     or inv_line.uos_id.category_id.id != inv_line.product_id.uom_id.category_id.id):
-                weight = inv_line.product_id.weight_net * inv_line.quantity
+                weight = inv_line.product_id.weight * inv_line.quantity
             else:
-                weight = (inv_line.product_id.weight_net *
+                weight = (inv_line.product_id.weight *
                           inv_line.quantity * inv_line.uos_id.factor)
             if (not inv_line.uos_id.category_id or not inv_line.product_id.uom_id.category_id
                     or inv_line.uos_id.category_id.id != inv_line.product_id.uom_id.category_id.id):
                 supply_units = inv_line.quantity
             else:
-                supply_units = inv_line.quantity * inv_line.uos_id.factor
+                supply_units = inv_line.quantity * inv_line.uom_id.factor
             amounts = entries.setdefault(linekey, (0, 0, 0))
             amounts = (amounts[0] + amount, amounts[1] + weight, amounts[2] + supply_units)
             entries[linekey] = amounts

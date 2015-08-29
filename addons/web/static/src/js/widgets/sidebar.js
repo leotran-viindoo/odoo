@@ -16,6 +16,7 @@ var Sidebar = Widget.extend({
     init: function(parent) {
         var self = this;
         this._super(parent);
+        this.view = this.getParent();
         this.sections = [
             { 'name' : 'print', 'label' : _t('Print'), },
             { 'name' : 'other', 'label' : _t('More'), }
@@ -120,7 +121,7 @@ var Sidebar = Widget.extend({
                 domain = $.Deferred().resolve(undefined);
             }
             if (ids.length === 0) {
-                new Dialog(this, { title: _t("Warning"), size: 'medium',}, $("<div />").text(_t("You must choose at least one record."))).open();
+                new Dialog(this, {title: _t("Warning"), size: 'medium', $content: $("<div/>").html(_t("You must choose at least one record."))}).open();
                 return false;
             }
             var dataset = self.getParent().dataset;
@@ -173,16 +174,14 @@ var Sidebar = Widget.extend({
         }
     },
     on_attachments_loaded: function(attachments) {
-        var self = this;
-        var prefix = session.url('/web/binary/saveas', {model: 'ir.attachment', field: 'datas', filename_field: 'name'});
         _.each(attachments,function(a) {
             a.label = a.name;
             if(a.type === "binary") {
-                a.url = prefix  + '&id=' + a.id + '&t=' + (new Date().getTime());
+                a.url = '/web/content/'  + a.id + '?download=true&t=' + (new Date().getTime());
             }
         });
-        self.items.files = attachments;
-        self.redraw();
+        this.items.files = attachments;
+        this.redraw();
         this.$('.oe_sidebar_add_attachment .oe_form_binary_file').change(this.on_attachment_changed);
         this.$el.find('.oe_sidebar_delete_item').click(this.on_attachment_delete);
     },

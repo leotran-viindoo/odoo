@@ -14,6 +14,7 @@ import test_ir_values
 import test_mail
 import test_menu
 import test_orm
+import test_ormcache
 import test_osv
 import test_qweb
 import test_res_config
@@ -24,3 +25,4 @@ import test_translate
 import test_view_validation
 import test_views
 import test_xmlrpc
+import test_res_partner_bank

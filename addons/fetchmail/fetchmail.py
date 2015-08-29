@@ -1,25 +1,8 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import logging
+import poplib
 import time
 from imaplib import IMAP4
 from imaplib import IMAP4_SSL
@@ -30,17 +13,17 @@ try:
 except ImportError:
     import StringIO
 
-import zipfile
-import base64
-from openerp import addons
-
 from openerp.osv import fields, osv
-from openerp import tools, api
+from openerp import tools, api, SUPERUSER_ID
 from openerp.tools.translate import _
 from openerp.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 MAX_POP_MESSAGES = 50
+MAIL_TIMEOUT = 60
+
+# Workaround for Python 2.7.8 bug https://bugs.python.org/issue23906
+poplib._MAXLINE = 65536
 
 class fetchmail_server(osv.osv):
     """Incoming POP/IMAP mail server account"""
@@ -151,6 +134,8 @@ openerp_mailgate: "|/path/to/openerp-mailgate.py --host=localhost -u %(uid)d -p 
             #connection.user("recent:"+server.user)
             connection.user(server.user)
             connection.pass_(server.password)
+        # Add timeout on socket
+        connection.sock.settimeout(MAIL_TIMEOUT)
         return connection
 
     def button_confirm_login(self, cr, uid, ids, context=None):
@@ -263,7 +248,7 @@ openerp_mailgate: "|/path/to/openerp-mailgate.py --host=localhost -u %(uid)d -p 
 
         try:
             cron = self.pool['ir.model.data'].get_object(
-                cr, uid, 'fetchmail', 'ir_cron_mail_gateway_action', context=context)
+                cr, SUPERUSER_ID, 'fetchmail', 'ir_cron_mail_gateway_action', context=context)
         except ValueError:
             # Nevermind if default cron cannot be found
             return

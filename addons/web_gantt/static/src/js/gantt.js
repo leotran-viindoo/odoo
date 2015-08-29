@@ -7,7 +7,7 @@ odoo.define('web_gantt.GanttView', function (require) {
 var core = require('web.core');
 var form_common = require('web.form_common');
 var formats = require('web.formats');
-var Model = require('web.Model');
+var Model = require('web.DataModel');
 var time = require('web.time');
 var View = require('web.View');
 
@@ -17,7 +17,7 @@ var QWeb = core.qweb;
 
 var GanttView = View.extend({
     display_name: _lt('Gantt'),
-    template: "GanttView",
+    icon: 'fa-tasks',
     view_type: "gantt",
     init: function() {
         this._super.apply(this, arguments);
@@ -196,8 +196,14 @@ var GanttView = View.extend({
         gantt.attachEvent("onTaskEndResize", function(task) {
             self.on_task_changed(task);
         });
+        // Horrible hack to make sure that something is in the dom with the required id.
+        // The problem is that the view manager renders the view in a document fragment.
+        var $div_with_id = $('<div>').addClass('o_gantt_container').attr('id', this.chart_id);
+        $div_with_id.prependTo(document.body);
         gantt.create(this.chart_id);
-        
+
+        this.$el.empty().append($div_with_id);
+
         // bind event to display task when we click the item in the tree
         $(".taskNameItem", self.$el).click(function(event) {
             var task_info = task_ids[event.target.id];
@@ -237,28 +243,20 @@ var GanttView = View.extend({
         this.dataset.write(itask.id, data);
     },
     on_task_display: function(task) {
-        var self = this;
-        var pop = new form_common.FormOpenPopup(self);
-        pop.on('write_completed',self,self.reload);
-        pop.show_element(
-            self.dataset.model,
-            task.id,
-            null,
-            {}
-        );
+        var pop = new form_common.FormViewDialog(this, {
+            res_model: this.dataset.model,
+            res_id: task.id,
+        }).open();
+        pop.on('write_completed', this, this.reload);
     },
     on_task_create: function() {
         var self = this;
-        var pop = new form_common.SelectCreatePopup(this);
-        pop.on("elements_selected", self, function() {
-            self.reload();
-        });
-        pop.select_element(
-            self.dataset.model,
-            {
-                initial_view: "form",
+        new form_common.FormViewDialog(this, {
+            res_model: self.dataset.model,
+            on_selected: function() {
+                self.reload();
             }
-        );
+        }).open();
     },
 });
 

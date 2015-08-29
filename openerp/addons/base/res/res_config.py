@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2009 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 import logging
 from operator import attrgetter
 import re
@@ -101,9 +83,7 @@ class res_config_configurable(osv.osv_memory):
         next = self._next_action(cr, uid, context=context)
         _logger.info('next action is %s', next)
         if next:
-            res = next.action_launch(context=context)
-            res['nodestroy'] = False
-            return res
+            return next.action_launch(context=context)
 
         return {
             'type': 'ir.actions.client',
@@ -419,8 +399,18 @@ class res_config_settings(osv.osv_memory, res_config_module_installation_mixin):
             By default 'group' is the group Employee.  Groups are given by their xml id.
             The attribute 'group' may contain several xml ids, separated by commas.
 
+        *   For a selection field like 'group_XXX' composed of 2 integers values ('0' and '1'),
+            ``execute`` adds/removes 'implied_group' to/from the implied groups of 'group', 
+            depending on the field's value.
+            By default 'group' is the group Employee.  Groups are given by their xml id.
+            The attribute 'group' may contain several xml ids, separated by commas.
+
         *   For a boolean field like 'module_XXX', ``execute`` triggers the immediate
             installation of the module named 'XXX' if the field has value ``True``.
+
+        *   For a selection field like 'module_XXX' composed of 2 integers values ('0' and '1'), 
+            ``execute`` triggers the immediate installation of the module named 'XXX' 
+            if the field has the integer value ``1``.
 
         *   For the other fields, the method ``execute`` invokes all methods with a name
             that starts with 'set_'; such methods can be defined to implement the effect
@@ -510,10 +500,11 @@ class res_config_settings(osv.osv_memory, res_config_module_installation_mixin):
         for name, field in self._columns.items():
             if name.startswith('default_') and hasattr(field, 'default_model'):
                 defaults.append((name, field.default_model, name[8:]))
-            elif name.startswith('group_') and isinstance(field, fields.boolean) and hasattr(field, 'implied_group'):
+            elif name.startswith('group_') and (isinstance(field, fields.boolean) or isinstance(field, fields.selection)) \
+                 and hasattr(field, 'implied_group'):
                 field_groups = getattr(field, 'group', 'base.group_user').split(',')
                 groups.append((name, map(ref, field_groups), ref(field.implied_group)))
-            elif name.startswith('module_') and isinstance(field, fields.boolean):
+            elif name.startswith('module_') and (isinstance(field, fields.boolean) or isinstance(field, fields.selection)):
                 mod_ids = ir_module.search(cr, uid, [('name', '=', name[7:])])
                 record = ir_module.browse(cr, uid, mod_ids[0], context) if mod_ids else None
                 modules.append((name, record))
@@ -541,6 +532,8 @@ class res_config_settings(osv.osv_memory, res_config_module_installation_mixin):
         # modules: which modules are installed/to install
         for name, module in classified['module']:
             res[name] = module and module.state in ('installed', 'to install', 'to upgrade')
+            if self._fields[name].type == 'selection':
+                res[name] = int(res[name])
 
         # other fields: call all methods that start with 'get_default_'
         for method in dir(self):
@@ -554,7 +547,7 @@ class res_config_settings(osv.osv_memory, res_config_module_installation_mixin):
             context = {}
 
         context = dict(context, active_test=False)
-        if uid != SUPERUSER_ID and not self.pool['res.users'].has_group(cr, uid, 'base.group_erp_manager'):
+        if not self.pool['res.users']._is_admin(cr, uid, [uid]):
             raise openerp.exceptions.AccessError(_("Only administrators can change the settings"))
 
         ir_values = self.pool['ir.values']

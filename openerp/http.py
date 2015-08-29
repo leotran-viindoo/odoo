@@ -44,6 +44,7 @@ except ImportError:
 
 import openerp
 from openerp import SUPERUSER_ID
+from openerp.service.server import memory_info
 from openerp.service import security, model as service_model
 from openerp.tools.func import lazy_property
 from openerp.tools import ustr
@@ -97,7 +98,7 @@ def dispatch_rpc(service_name, method, params):
             start_time = time.time()
             start_rss, start_vms = 0, 0
             if psutil:
-                start_rss, start_vms = psutil.Process(os.getpid()).get_memory_info()
+                start_rss, start_vms = memory_info(psutil.Process(os.getpid()))
             if rpc_request and rpc_response_flag:
                 openerp.netsvc.log(rpc_request, logging.DEBUG, '%s.%s' % (service_name, method), replace_request_password(params))
 
@@ -111,15 +112,13 @@ def dispatch_rpc(service_name, method, params):
             dispatch = openerp.service.model.dispatch
         elif service_name == 'report':
             dispatch = openerp.service.report.dispatch
-        else:
-            dispatch = openerp.service.wsgi_server.rpc_handlers.get(service_name)
         result = dispatch(method, params)
 
         if rpc_request_flag or rpc_response_flag:
             end_time = time.time()
             end_rss, end_vms = 0, 0
             if psutil:
-                end_rss, end_vms = psutil.Process(os.getpid()).get_memory_info()
+                end_rss, end_vms = memory_info(psutil.Process(os.getpid()))
             logline = '%s.%s time:%.3fs mem: %sk -> %sk (diff: %sk)' % (service_name, method, end_time - start_time, start_vms / 1024, end_vms / 1024, (end_vms - start_vms)/1024)
             if rpc_response_flag:
                 openerp.netsvc.log(rpc_response, logging.DEBUG, logline, result)
@@ -203,7 +202,11 @@ class WebRequest(object):
     def env(self):
         """
         The :class:`~openerp.api.Environment` bound to current request.
+        Raises a :class:`RuntimeError` if the current requests is not bound
+        to a database.
         """
+        if not self.db:
+            return RuntimeError('request not bound to a database')
         return openerp.api.Environment(self.cr, self.uid, self.context)
 
     @lazy_property
@@ -238,6 +241,8 @@ class WebRequest(object):
         """
         # can not be a lazy_property because manual rollback in _call_function
         # if already set (?)
+        if not self.db:
+            return RuntimeError('request not bound to a database')
         if not self._cr:
             self._cr = self.registry.cursor()
         return self._cr
@@ -309,7 +314,10 @@ class WebRequest(object):
     def debug(self):
         """ Indicates whether the current request is in "debug" mode
         """
-        return 'debug' in self.httprequest.args
+        debug = 'debug' in self.httprequest.args
+        if not debug and self.httprequest.referrer:
+            debug = bool(urlparse.parse_qs(urlparse.urlparse(self.httprequest.referrer).query, keep_blank_values=True).get('debug'))
+        return debug
 
     @contextlib.contextmanager
     def registry_cr(self):
@@ -403,7 +411,7 @@ def route(route=None, **kw):
                 return Response(response)
 
             if isinstance(response, werkzeug.exceptions.HTTPException):
-                response = response.get_response()
+                response = response.get_response(request.httprequest.environ)
             if isinstance(response, werkzeug.wrappers.BaseResponse):
                 response = Response.force_type(response)
                 response.set_default()
@@ -561,7 +569,7 @@ class JsonRequest(WebRequest):
                 start_time = time.time()
                 _, start_vms = 0, 0
                 if psutil:
-                    _, start_vms = psutil.Process(os.getpid()).get_memory_info()
+                    _, start_vms = memory_info(psutil.Process(os.getpid()))
                 if rpc_request and rpc_response_flag:
                     rpc_request.debug('%s: %s %s, %s',
                         endpoint, model, method, pprint.pformat(args))
@@ -572,7 +580,7 @@ class JsonRequest(WebRequest):
                 end_time = time.time()
                 _, end_vms = 0, 0
                 if psutil:
-                    _, end_vms = psutil.Process(os.getpid()).get_memory_info()
+                    _, end_vms = memory_info(psutil.Process(os.getpid()))
                 logline = '%s: %s %s: time:%.3fs mem: %sk -> %sk (diff: %sk)' % (
                     endpoint, model, method, end_time - start_time, start_vms / 1024, end_vms / 1024, (end_vms - start_vms)/1024)
                 if rpc_response_flag:
@@ -669,9 +677,16 @@ class HttpRequest(WebRequest):
         try:
             return super(HttpRequest, self)._handle_exception(exception)
         except SessionExpiredException:
-            if not request.params.get('noredirect'):
+            redirect = None
+            req = request.httprequest
+            if req.method == 'POST':
+                request.session.save_request_data()
+                redirect = '/web/proxy/post{r.path}?{r.query_string}'.format(r=req)
+            elif not request.params.get('noredirect'):
+                redirect = req.url
+            if redirect:
                 query = werkzeug.urls.url_encode({
-                    'redirect': request.httprequest.url,
+                    'redirect': redirect,
                 })
                 return werkzeug.utils.redirect('/web/login?%s' % query)
         except werkzeug.exceptions.HTTPException, e:
@@ -907,7 +922,8 @@ class Model(object):
                 raise Exception("Access denied")
             mod = request.registry[self.model]
             meth = getattr(mod, method)
-            cr = request.cr
+            # make sure to instantiate an environment
+            cr = request.env.cr
             result = meth(cr, request.uid, *args, **kw)
             # reorder read
             if method == "read":
@@ -923,6 +939,7 @@ class OpenERPSession(werkzeug.contrib.sessions.Session):
     def __init__(self, *args, **kwargs):
         self.inited = False
         self.modified = False
+        self.rotate = False
         super(OpenERPSession, self).__init__(*args, **kwargs)
         self.inited = True
         self._default_values()
@@ -983,6 +1000,7 @@ class OpenERPSession(werkzeug.contrib.sessions.Session):
             if not (keep_db and k == 'db'):
                 del self[k]
         self._default_values()
+        self.rotate = True
 
     def _default_values(self):
         self.setdefault("db", None)
@@ -1161,6 +1179,46 @@ class OpenERPSession(werkzeug.contrib.sessions.Session):
         """
         saved_actions = self.get('saved_actions', {})
         return saved_actions.get("actions", {}).get(key)
+
+    def save_request_data(self):
+        import uuid
+        req = request.httprequest
+        files = werkzeug.datastructures.MultiDict()
+        # NOTE we do not store files in the session itself to avoid loading them in memory.
+        #      By storing them in the session store, we ensure every worker (even ones on other
+        #      servers) can access them. It also allow stale files to be deleted by `session_gc`.
+        for f in req.files.values():
+            storename = 'werkzeug_%s_%s.file' % (self.sid, uuid.uuid4().hex)
+            path = os.path.join(root.session_store.path, storename)
+            with open(path, 'w') as fp:
+                f.save(fp)
+            files.add(f.name, (storename, f.filename, f.content_type))
+        self['serialized_request_data'] = {
+            'form': req.form,
+            'files': files,
+        }
+
+    @contextlib.contextmanager
+    def load_request_data(self):
+        data = self.pop('serialized_request_data', None)
+        files = werkzeug.datastructures.MultiDict()
+        try:
+            if data:
+                # regenerate files filenames with the current session store
+                for name, (storename, filename, content_type) in data['files'].iteritems():
+                    path = os.path.join(root.session_store.path, storename)
+                    files.add(name, (path, filename, content_type))
+                yield werkzeug.datastructures.CombinedMultiDict([data['form'], files])
+            else:
+                yield None
+        finally:
+            # cleanup files
+            for f, _, _ in files.values():
+                try:
+                    os.unlink(f)
+                except IOError:
+                    pass
+
 
 def session_gc(session_store):
     if random.random() < 0.001:
@@ -1378,7 +1436,22 @@ class Root(object):
         else:
             response = result
 
+        # save to cache if requested and possible
+        if getattr(request, 'cache_save', False) and response.status_code == 200:
+            response.freeze()
+            r = response.response
+            if isinstance(r, list) and len(r) == 1 and isinstance(r[0], str):
+                request.registry.cache[request.cache_save] = {
+                    'content': r[0],
+                    'mimetype': response.headers['Content-Type'],
+                    'time': time.time(),
+                }
+
         if httprequest.session.should_save:
+            if httprequest.session.rotate:
+                self.session_store.delete(httprequest.session)
+                httprequest.session.sid = self.session_store.generate_key()
+                httprequest.session.modified = True
             self.session_store.save(httprequest.session)
         # We must not set the cookie if the session id was specified using a http header or a GET parameter.
         # There are two reasons to this:
@@ -1421,13 +1494,19 @@ class Root(object):
                     try:
                         with openerp.tools.mute_logger('openerp.sql_db'):
                             ir_http = request.registry['ir.http']
-                    except (AttributeError, psycopg2.OperationalError):
+                    except (AttributeError, psycopg2.OperationalError, psycopg2.ProgrammingError):
                         # psycopg2 error or attribute error while constructing
-                        # the registry. That means the database probably does
-                        # not exists anymore or the code doesnt match the db.
+                        # the registry. That means either
+                        # - the database probably does not exists anymore
+                        # - the database is corrupted
+                        # - the database version doesnt match the server version
                         # Log the user out and fall back to nodb
                         request.session.logout()
-                        result = _dispatch_nodb()
+                        # If requesting /web this will loop
+                        if request.httprequest.path == '/web':
+                            result = werkzeug.utils.redirect('/web/database/selector')
+                        else:
+                            result = _dispatch_nodb()
                     else:
                         result = ir_http._dispatch()
                         openerp.modules.registry.RegistryManager.signal_caches_change(db)
@@ -1446,7 +1525,7 @@ class Root(object):
         return request.registry['ir.http'].routing_map()
 
 def db_list(force=False, httprequest=None):
-    dbs = dispatch_rpc("db", "list", [force])
+    dbs = openerp.service.db.list_dbs(force)
     return db_filter(dbs, httprequest=httprequest)
 
 def db_filter(dbs, httprequest=None):
@@ -1596,6 +1675,5 @@ class CommonController(Controller):
         nsession = root.session_store.new()
         return nsession.sid
 
-# register main wsgi handler
+#  main wsgi handler
 root = Root()
-openerp.service.wsgi_server.register_wsgi_handler(root)

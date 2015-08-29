@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from openerp.osv import fields,osv
 from openerp.tools.translate import _
@@ -32,19 +14,8 @@ class stock_picking(osv.osv):
     def _cal_weight(self, cr, uid, ids, name, args, context=None):
         res = {}
         for picking in self.browse(cr, uid, ids, context=context):
-            total_weight = total_weight_net = 0.00
-
-            for move in picking.move_lines:
-                if move.state != 'cancel':
-                    total_weight += move.weight
-                    total_weight_net += move.weight_net
-
-            res[picking.id] = {
-                                'weight': total_weight,
-                                'weight_net': total_weight_net,
-                              }
+            res[picking.id] = sum(move.weight for move in picking.move_lines if move.state != 'cancel')
         return res
-
 
     def _get_picking_line(self, cr, uid, ids, context=None):
         result = {}
@@ -56,12 +27,7 @@ class stock_picking(osv.osv):
     _columns = {
         'carrier_id':fields.many2one("delivery.carrier","Carrier"),
         'volume': fields.float('Volume', copy=False),
-        'weight': fields.function(_cal_weight, type='float', string='Weight', digits_compute= dp.get_precision('Stock Weight'), multi='_cal_weight',
-                  store={
-                 'stock.picking': (lambda self, cr, uid, ids, c={}: ids, ['move_lines'], 40),
-                 'stock.move': (_get_picking_line, ['state', 'picking_id', 'product_id','product_uom_qty','product_uom'], 40),
-                 }),
-        'weight_net': fields.function(_cal_weight, type='float', string='Net Weight', digits_compute= dp.get_precision('Stock Weight'), multi='_cal_weight',
+        'weight': fields.function(_cal_weight, type='float', string='Weight', digits_compute= dp.get_precision('Stock Weight'),
                   store={
                  'stock.picking': (lambda self, cr, uid, ids, c={}: ids, ['move_lines'], 40),
                  'stock.move': (_get_picking_line, ['state', 'picking_id', 'product_id','product_uom_qty','product_uom'], 40),
@@ -82,9 +48,11 @@ class stock_picking(osv.osv):
         """
         carrier_obj = self.pool.get('delivery.carrier')
         grid_obj = self.pool.get('delivery.grid')
+        fpos_obj = self.pool['account.fiscal.position']
+        currency_obj = self.pool.get('res.currency')
         if not picking.carrier_id or \
             any(inv_line.product_id.id == picking.carrier_id.product_id.id
-                for inv_line in invoice.invoice_line):
+                for inv_line in invoice.invoice_line_ids):
             return None
         grid_id = carrier_obj.grid_get(cr, uid, [picking.carrier_id.id],
                 picking.partner_id.id, context=context)
@@ -94,32 +62,38 @@ class stock_picking(osv.osv):
         price = grid_obj.get_price_from_picking(cr, uid, grid_id,
                 invoice.amount_untaxed, picking.weight, picking.volume,
                 quantity, context=context)
-        account_id = picking.carrier_id.product_id.property_account_income.id
+        if invoice.company_id.currency_id.id != invoice.currency_id.id:
+            price = currency_obj.compute(cr, uid, invoice.company_id.currency_id.id, invoice.currency_id.id,
+                price, context=dict(context or {}, date=invoice.date_invoice))
+        account_id = picking.carrier_id.product_id.property_account_income_id.id
         if not account_id:
             account_id = picking.carrier_id.product_id.categ_id\
-                    .property_account_income_categ.id
+                    .property_account_income_categ_id.id
 
         taxes = picking.carrier_id.product_id.taxes_id
+        taxes_ids = [x.id for x in taxes]
         partner = picking.partner_id or False
-        if partner:
-            account_id = self.pool.get('account.fiscal.position').map_account(cr, uid, partner.property_account_position, account_id)
-            taxes_ids = self.pool.get('account.fiscal.position').map_tax(cr, uid, partner.property_account_position, taxes)
-        else:
-            taxes_ids = [x.id for x in taxes]
+        fpos = None
+        if picking.sale_id and picking.sale_id.fiscal_position_id:
+            fpos = picking.sale_id.fiscal_position_id
+        elif picking.partner_id:
+            fpos = partner.property_account_position_id
+        # TDE FIXME: spotted undefined variable
+        account_id = fpos_obj.map_account(cr, uid, fpos, account_id, context=context)
+        taxes_ids = fpos_obj.map_tax(cr, uid, fpos, taxes, context=context)
 
         return {
             'name': picking.carrier_id.name,
             'invoice_id': invoice.id,
-            'uos_id': picking.carrier_id.product_id.uos_id.id,
+            'uom_id': picking.carrier_id.product_id.uom_id.id,
             'product_id': picking.carrier_id.product_id.id,
             'account_id': account_id,
             'price_unit': price,
             'quantity': 1,
-            'invoice_line_tax_id': [(6, 0, taxes_ids)],
+            'invoice_line_tax_ids': [(6, 0, taxes_ids)],
         }
 
     def _invoice_create_line(self, cr, uid, moves, journal_id, inv_type='out_invoice', context=None):
-        invoice_obj = self.pool.get('account.invoice')
         invoice_line_obj = self.pool.get('account.invoice.line')
         invoice_ids = super(stock_picking, self)._invoice_create_line(cr, uid, moves, journal_id, inv_type=inv_type, context=context)
         delivey_invoices = {}
@@ -132,7 +106,6 @@ class stock_picking(osv.osv):
                 invoice_line = self._prepare_shipping_invoice_line(cr, uid, picking, invoice, context=context)
                 if invoice_line:
                     invoice_line_obj.create(cr, uid, invoice_line)
-                    invoice_obj.button_compute(cr, uid, [invoice.id], context=context, set_total=(inv_type in ('in_invoice', 'in_refund')))
         return invoice_ids
 
     def _get_default_uom(self, cr, uid, context=None):
@@ -149,28 +122,15 @@ class stock_move(osv.osv):
 
     def _cal_move_weight(self, cr, uid, ids, name, args, context=None):
         res = {}
-        uom_obj = self.pool.get('product.uom')
         for move in self.browse(cr, uid, ids, context=context):
-            weight = weight_net = 0.00
+            weight = 0.00
             if move.product_id.weight > 0.00:
-                converted_qty = move.product_qty
-                weight = (converted_qty * move.product_id.weight)
-
-                if move.product_id.weight_net > 0.00:
-                    weight_net = (converted_qty * move.product_id.weight_net)
-
-            res[move.id] =  {
-                            'weight': weight,
-                            'weight_net': weight_net,
-                            }
+                weight = move.product_qty * move.product_id.weight
+            res[move.id] = weight
         return res
 
     _columns = {
-        'weight': fields.function(_cal_move_weight, type='float', string='Weight', digits_compute= dp.get_precision('Stock Weight'), multi='_cal_move_weight',
-                  store={
-                 'stock.move': (lambda self, cr, uid, ids, c=None: ids, ['product_id', 'product_uom_qty', 'product_uom'], 30),
-                 }),
-        'weight_net': fields.function(_cal_move_weight, type='float', string='Net weight', digits_compute= dp.get_precision('Stock Weight'), multi='_cal_move_weight',
+        'weight': fields.function(_cal_move_weight, type='float', string='Weight', digits_compute= dp.get_precision('Stock Weight'),
                   store={
                  'stock.move': (lambda self, cr, uid, ids, c=None: ids, ['product_id', 'product_uom_qty', 'product_uom'], 30),
                  }),

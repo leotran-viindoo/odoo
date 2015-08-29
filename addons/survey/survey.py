@@ -1,26 +1,9 @@
 # -*- encoding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-TODAY OpenERP S.A. <http://www.openerp.com>
-#
-#    This program is free software: you can redistribute it and / or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
+from openerp import SUPERUSER_ID
 from openerp.tools import DEFAULT_SERVER_DATETIME_FORMAT as DF
 from openerp.addons.website.models.website import slug
 from urlparse import urljoin
@@ -398,7 +381,7 @@ class survey_survey(osv.Model):
                                        'max': round(max(all_inputs), 2),
                                        'min': round(min(all_inputs), 2),
                                        'sum': sum(all_inputs),
-                                       'most_comman': Counter(all_inputs).most_common(5)})
+                                       'most_common': Counter(all_inputs).most_common(5)})
         return result_summary
 
     def get_input_summary(self, cr, uid, question, current_filters=None, context=None):
@@ -769,7 +752,7 @@ class survey_question(osv.Model):
         if question.comments_allowed:
             comment_tag = "%s_%s" % (answer_tag, 'comment')
         # Empty answer to mandatory question
-        if question.constr_mandatory and not answer_tag in post:
+        if question.constr_mandatory and answer_tag not in post:
             errors.update({answer_tag: question.constr_error_msg})
         if question.constr_mandatory and answer_tag in post and post[answer_tag].strip() == '':
             errors.update({answer_tag: question.constr_error_msg})
@@ -785,6 +768,9 @@ class survey_question(osv.Model):
             comment_flag = answer_candidates.pop(("%s_%s" % (answer_tag, -1)), None)
             if question.comments_allowed:
                 comment_answer = answer_candidates.pop(("%s_%s" % (answer_tag, 'comment')), '').strip()
+            # Preventing answers with blank value
+            if all([True if answer.strip() == '' else False for answer in answer_candidates.values()]):
+                errors.update({answer_tag: question.constr_error_msg})
             # There is no answer neither comments (if comments count as answer)
             if not answer_candidates and question.comment_count_as_answer and (not comment_flag or not comment_answer):
                 errors.update({answer_tag: question.constr_error_msg})
@@ -859,7 +845,7 @@ class survey_user_input(osv.Model):
         'survey_id': fields.many2one('survey.survey', 'Survey', required=True,
                                      readonly=1, ondelete='restrict'),
         'date_create': fields.datetime('Creation Date', required=True,
-                                       readonly=1),
+                                       readonly=1, copy=False),
         'deadline': fields.datetime("Deadline",
                                 help="Date by which the person can open the survey and submit answers",
                                 oldname="date_deadline"),
@@ -872,7 +858,7 @@ class survey_user_input(osv.Model):
                                   'Status',
                                   readonly=True),
         'test_entry': fields.boolean('Test entry', readonly=1),
-        'token': fields.char("Identification token", readonly=1, required=1),
+        'token': fields.char("Identification token", readonly=1, required=1, copy=False),
 
         # Optional Identification data
         'partner_id': fields.many2one('res.partner', 'Partner', readonly=1),
@@ -883,7 +869,7 @@ class survey_user_input(osv.Model):
                                               'Last displayed page'),
         # The answers !
         'user_input_line_ids': fields.one2many('survey.user_input_line',
-                                               'user_input_id', 'Answers'),
+                                               'user_input_id', 'Answers', copy=True),
 
         # URLs used to display the answers
         'result_url': fields.related('survey_id', 'result_url', type='char',
@@ -905,9 +891,6 @@ class survey_user_input(osv.Model):
         ('unique_token', 'UNIQUE (token)', 'A token must be unique!'),
         ('deadline_in_the_past', 'CHECK (deadline >= date_create)', 'The deadline cannot be in the past')
     ]
-
-    def copy_data(self, cr, uid, id, default=None, context=None):
-        raise UserError(_('You cannot duplicate this element!'))
 
     def do_clean_emptys(self, cr, uid, automatic=False, context=None):
         ''' Remove empty user inputs that have been created manually
@@ -1037,9 +1020,6 @@ class survey_user_input_line(osv.Model):
             vals.update({'quizz_mark': self.__get_mark(cr, uid, value_suggested)})
         return super(survey_user_input_line, self).write(cr, uid, ids, vals, context=context)
 
-    def copy_data(self, cr, uid, id, default=None, context=None):
-        raise UserError(_('You cannot duplicate this element!'))
-
     def save_lines(self, cr, uid, user_input_id, question, post, answer_tag,
                    context=None):
         ''' Save answers to questions, depending on question type
@@ -1155,7 +1135,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         if answer_tag in post and post[answer_tag].strip() != '':
             vals.update({'answer_type': 'suggestion', 'value_suggested': post[answer_tag]})
@@ -1186,7 +1166,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         ca = dict_keys_startswith(post, answer_tag)
         comment_answer = ca.pop(("%s_%s" % (answer_tag, 'comment')), '').strip()
@@ -1217,7 +1197,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         no_answers = True
         ca = dict_keys_startswith(post, answer_tag)

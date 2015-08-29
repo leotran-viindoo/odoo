@@ -1,24 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2009 Tiny SPRL (<http://tiny.be>).
-#    Copyright (C) 2010-2014 OpenERP s.a. (<http://openerp.com>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 
 """
@@ -37,8 +18,7 @@ import threading
 import time
 import werkzeug.utils
 import zipfile
-from collections import defaultdict, Mapping
-from datetime import datetime
+from collections import defaultdict, Mapping, OrderedDict
 from itertools import islice, izip, groupby
 from lxml import etree
 from which import which
@@ -453,27 +433,6 @@ class UpdateableDict(local):
     def __ne__(self, y):
         return self.dict.__ne__(y)
 
-class currency(float):
-    """ Deprecate
-    
-    .. warning::
-    
-    Don't use ! Use res.currency.round()
-    """
-
-    def __init__(self, value, accuracy=2, rounding=None):
-        if rounding is None:
-            rounding=10**-accuracy
-        self.rounding=rounding
-        self.accuracy=accuracy
-
-    def __new__(cls, value, accuracy=2, rounding=None):
-        return float.__new__(cls, round(value, accuracy))
-
-    #def __str__(self):
-    #   display_value = int(self*(10**(-self.accuracy))/self.rounding)*self.rounding/(10**(-self.accuracy))
-    #   return str(display_value)
-
 def to_xml(s):
     return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
 
@@ -484,7 +443,6 @@ def get_iso_codes(lang):
     return lang
 
 ALL_LANGUAGES = {
-        'ab_RU': u'Abkhazian / аҧсуа',
         'am_ET': u'Amharic / አምሃርኛ',
         'ar_SY': u'Arabic / الْعَرَبيّة',
         'bg_BG': u'Bulgarian / български език',
@@ -494,7 +452,7 @@ ALL_LANGUAGES = {
         'da_DK': u'Danish / Dansk',
         'de_DE': u'German / Deutsch',
         'el_GR': u'Greek / Ελληνικά',
-        'en_CA': u'English (CA)',
+        'en_AU': u'English (AU)',
         'en_GB': u'English (UK)',
         'en_US': u'English (US)',
         'es_AR': u'Spanish (AR) / Español (AR)',
@@ -506,14 +464,10 @@ ALL_LANGUAGES = {
         'es_EC': u'Spanish (EC) / Español (EC)',
         'es_ES': u'Spanish / Español',
         'es_GT': u'Spanish (GT) / Español (GT)',
-        'es_HN': u'Spanish (HN) / Español (HN)',
         'es_MX': u'Spanish (MX) / Español (MX)',
-        'es_NI': u'Spanish (NI) / Español (NI)',
         'es_PA': u'Spanish (PA) / Español (PA)',
         'es_PE': u'Spanish (PE) / Español (PE)',
-        'es_PR': u'Spanish (PR) / Español (PR)',
         'es_PY': u'Spanish (PY) / Español (PY)',
-        'es_SV': u'Spanish (SV) / Español (SV)',
         'es_UY': u'Spanish (UY) / Español (UY)',
         'es_VE': u'Spanish (VE) / Español (VE)',
         'et_EE': u'Estonian / Eesti keel',
@@ -522,6 +476,7 @@ ALL_LANGUAGES = {
         'fr_BE': u'French (BE) / Français (BE)',
         'fr_CA': u'French (CA) / Français (CA)',
         'fr_CH': u'French (CH) / Français (CH)',
+        'fr_CA': u'French (CA) / Français (CA)',
         'fr_FR': u'French / Français',
         'gl_ES': u'Galician / Galego',
         'gu_IN': u'Gujarati / ગુજરાતી',
@@ -531,26 +486,24 @@ ALL_LANGUAGES = {
         'hu_HU': u'Hungarian / Magyar',
         'id_ID': u'Indonesian / Bahasa Indonesia',
         'it_IT': u'Italian / Italiano',
-        'iu_CA': u'Inuktitut / ᐃᓄᒃᑎᑐᑦ',
         'ja_JP': u'Japanese / 日本語',
+        'ka_GE': u'Georgian / ქართული ენა',
+        'kab_DZ': u'Kabyle / Taqbaylit',
         'ko_KP': u'Korean (KP) / 한국어 (KP)',
         'ko_KR': u'Korean (KR) / 한국어 (KR)',
         'lo_LA': u'Lao / ພາສາລາວ',
         'lt_LT': u'Lithuanian / Lietuvių kalba',
         'lv_LV': u'Latvian / latviešu valoda',
         'mk_MK': u'Macedonian / македонски јазик',
-        'ml_IN': u'Malayalam / മലയാളം',
         'mn_MN': u'Mongolian / монгол',
         'nb_NO': u'Norwegian Bokmål / Norsk bokmål',
         'nl_NL': u'Dutch / Nederlands',
         'nl_BE': u'Dutch (BE) / Nederlands (BE)',
-        'oc_FR': u'Occitan (FR, post 1500) / Occitan',
         'pl_PL': u'Polish / Język polski',
         'pt_BR': u'Portuguese (BR) / Português (BR)',
         'pt_PT': u'Portuguese / Português',
         'ro_RO': u'Romanian / română',
         'ru_RU': u'Russian / русский язык',
-        'si_LK': u'Sinhalese / සිංහල',
         'sl_SI': u'Slovenian / slovenščina',
         'sk_SK': u'Slovak / Slovenský jazyk',
         'sq_AL': u'Albanian / Shqip',
@@ -561,12 +514,10 @@ ALL_LANGUAGES = {
         'tr_TR': u'Turkish / Türkçe',
         'vi_VN': u'Vietnamese / Tiếng Việt',
         'uk_UA': u'Ukrainian / українська',
-        'ur_PK': u'Urdu / اردو',
         'zh_CN': u'Chinese (CN) / 简体中文',
         'zh_HK': u'Chinese (HK)',
         'zh_TW': u'Chinese (TW) / 正體字',
         'th_TH': u'Thai / ภาษาไทย',
-        'tlh_TLH': u'Klingon',
     }
 
 def scan_languages():
@@ -656,48 +607,6 @@ class profile(object):
             return result
 
         return wrapper
-
-__icons_list = ['STOCK_ABOUT', 'STOCK_ADD', 'STOCK_APPLY', 'STOCK_BOLD',
-'STOCK_CANCEL', 'STOCK_CDROM', 'STOCK_CLEAR', 'STOCK_CLOSE', 'STOCK_COLOR_PICKER',
-'STOCK_CONNECT', 'STOCK_CONVERT', 'STOCK_COPY', 'STOCK_CUT', 'STOCK_DELETE',
-'STOCK_DIALOG_AUTHENTICATION', 'STOCK_DIALOG_ERROR', 'STOCK_DIALOG_INFO',
-'STOCK_DIALOG_QUESTION', 'STOCK_DIALOG_WARNING', 'STOCK_DIRECTORY', 'STOCK_DISCONNECT',
-'STOCK_DND', 'STOCK_DND_MULTIPLE', 'STOCK_EDIT', 'STOCK_EXECUTE', 'STOCK_FILE',
-'STOCK_FIND', 'STOCK_FIND_AND_REPLACE', 'STOCK_FLOPPY', 'STOCK_GOTO_BOTTOM',
-'STOCK_GOTO_FIRST', 'STOCK_GOTO_LAST', 'STOCK_GOTO_TOP', 'STOCK_GO_BACK',
-'STOCK_GO_DOWN', 'STOCK_GO_FORWARD', 'STOCK_GO_UP', 'STOCK_HARDDISK',
-'STOCK_HELP', 'STOCK_HOME', 'STOCK_INDENT', 'STOCK_INDEX', 'STOCK_ITALIC',
-'STOCK_JUMP_TO', 'STOCK_JUSTIFY_CENTER', 'STOCK_JUSTIFY_FILL',
-'STOCK_JUSTIFY_LEFT', 'STOCK_JUSTIFY_RIGHT', 'STOCK_MEDIA_FORWARD',
-'STOCK_MEDIA_NEXT', 'STOCK_MEDIA_PAUSE', 'STOCK_MEDIA_PLAY',
-'STOCK_MEDIA_PREVIOUS', 'STOCK_MEDIA_RECORD', 'STOCK_MEDIA_REWIND',
-'STOCK_MEDIA_STOP', 'STOCK_MISSING_IMAGE', 'STOCK_NETWORK', 'STOCK_NEW',
-'STOCK_NO', 'STOCK_OK', 'STOCK_OPEN', 'STOCK_PASTE', 'STOCK_PREFERENCES',
-'STOCK_PRINT', 'STOCK_PRINT_PREVIEW', 'STOCK_PROPERTIES', 'STOCK_QUIT',
-'STOCK_REDO', 'STOCK_REFRESH', 'STOCK_REMOVE', 'STOCK_REVERT_TO_SAVED',
-'STOCK_SAVE', 'STOCK_SAVE_AS', 'STOCK_SELECT_COLOR', 'STOCK_SELECT_FONT',
-'STOCK_SORT_ASCENDING', 'STOCK_SORT_DESCENDING', 'STOCK_SPELL_CHECK',
-'STOCK_STOP', 'STOCK_STRIKETHROUGH', 'STOCK_UNDELETE', 'STOCK_UNDERLINE',
-'STOCK_UNDO', 'STOCK_UNINDENT', 'STOCK_YES', 'STOCK_ZOOM_100',
-'STOCK_ZOOM_FIT', 'STOCK_ZOOM_IN', 'STOCK_ZOOM_OUT',
-'terp-account', 'terp-crm', 'terp-mrp', 'terp-product', 'terp-purchase',
-'terp-sale', 'terp-tools', 'terp-administration', 'terp-hr', 'terp-partner',
-'terp-project', 'terp-report', 'terp-stock', 'terp-calendar', 'terp-graph',
-'terp-check','terp-go-month','terp-go-year','terp-go-today','terp-document-new','terp-camera_test',
-'terp-emblem-important','terp-gtk-media-pause','terp-gtk-stop','terp-gnome-cpu-frequency-applet+',
-'terp-dialog-close','terp-gtk-jump-to-rtl','terp-gtk-jump-to-ltr','terp-accessories-archiver',
-'terp-stock_align_left_24','terp-stock_effects-object-colorize','terp-go-home','terp-gtk-go-back-rtl',
-'terp-gtk-go-back-ltr','terp-personal','terp-personal-','terp-personal+','terp-accessories-archiver-minus',
-'terp-accessories-archiver+','terp-stock_symbol-selection','terp-call-start','terp-dolar',
-'terp-face-plain','terp-folder-blue','terp-folder-green','terp-folder-orange','terp-folder-yellow',
-'terp-gdu-smart-failing','terp-go-week','terp-gtk-select-all','terp-locked','terp-mail-forward',
-'terp-mail-message-new','terp-mail-replied','terp-rating-rated','terp-stage','terp-stock_format-scientific',
-'terp-dolar_ok!','terp-idea','terp-stock_format-default','terp-mail-','terp-mail_delete'
-]
-
-def icons(*a, **kw):
-    global __icons_list
-    return [(x, x) for x in __icons_list ]
 
 def detect_ip_addr():
     """Try a very crude method to figure out a valid external
@@ -1155,6 +1064,35 @@ class frozendict(dict):
     def update(self, *args, **kwargs):
         raise NotImplementedError("'update' not supported on frozendict")
 
+class Collector(Mapping):
+    """ A mapping from keys to lists. This is essentially a space optimization
+        for ``defaultdict(list)``.
+    """
+    __slots__ = ['_map']
+    def __init__(self):
+        self._map = {}
+    def add(self, key, val):
+        vals = self._map.setdefault(key, [])
+        if val not in vals:
+            vals.append(val)
+    def __getitem__(self, key):
+        return self._map.get(key, ())
+    def __iter__(self):
+        return iter(self._map)
+    def __len__(self):
+        return len(self._map)
+
+class OrderedSet(OrderedDict):
+    """ A simple collection that remembers the elements insertion order. """
+    def __init__(self, seq=()):
+        super(OrderedSet, self).__init__([(x, None) for x in seq])
+
+    def add(self, elem):
+        self[elem] = None
+
+    def discard(self, elem):
+        self.pop(elem, None)
+
 @contextmanager
 def ignore(*exc):
     try:
@@ -1169,3 +1107,40 @@ if parse_version(getattr(werkzeug, '__version__', '0.0')) < parse_version('0.9.0
 else:
     def html_escape(text):
         return werkzeug.utils.escape(text)
+
+def formatLang(env, value, digits=None, grouping=True, monetary=False, dp=False, currency_obj=False):
+    """
+        Assuming 'Account' decimal.precision=3:
+            formatLang(value) -> digits=2 (default)
+            formatLang(value, digits=4) -> digits=4
+            formatLang(value, dp='Account') -> digits=3
+            formatLang(value, digits=5, dp='Account') -> digits=5
+    """
+
+    if digits is None:
+        digits = DEFAULT_DIGITS = 2
+        if dp:
+            decimal_precision_obj = env['decimal.precision']
+            digits = decimal_precision_obj.precision_get(dp)
+        elif (hasattr(value, '_field') and isinstance(value._field, (float_field, function_field)) and value._field.digits):
+                digits = value._field.digits[1]
+                if not digits and digits is not 0:
+                    digits = DEFAULT_DIGITS
+
+    if isinstance(value, (str, unicode)) and not value:
+        return ''
+
+    lang = env.user.company_id.partner_id.lang or 'en_US'
+    lang_objs = env['res.lang'].search([('code', '=', lang)])
+    if not lang_objs:
+        lang_objs = env['res.lang'].search([('code', '=', 'en_US')])
+    lang_obj = lang_objs[0]
+
+    res = lang_obj.format('%.' + str(digits) + 'f', value, grouping=grouping, monetary=monetary)
+
+    if currency_obj:
+        if currency_obj.position == 'after':
+            res = '%s %s' % (res, currency_obj.symbol)
+        elif currency_obj and currency_obj.position == 'before':
+            res = '%s %s' % (currency_obj.symbol, res)
+    return res

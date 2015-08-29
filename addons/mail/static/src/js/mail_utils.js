@@ -27,23 +27,6 @@ function parse_email(text) {
     return [text, false];
 }
 
-/* Get an image in /web/binary/image?... */
-function get_image(session, model, field, id, resize) {
-    var r = resize ? encodeURIComponent(resize) : '';
-    id = id || '';
-    return session.url('/web/binary/image', {model: model, field: field, id: id, resize: r});
-}
-
-/* Get the url of an attachment {'id': id} */
-function get_attachment_url(session, message_id, attachment_id) {
-    return session.url('/mail/download_attachment', {
-        'model': 'mail.message',
-        'id': message_id,
-        'method': 'download_attachment',
-        'attachment_id': attachment_id
-    });
-}
-
 /**
  * Replaces some expressions
  * - :name - shortcut to an image
@@ -107,14 +90,29 @@ function breakword(str){
     return out;
 }
 
+function bindTooltipTo($el, value, position) {
+    $el.tooltip({
+        'title': value,
+        'placement': position,
+        'html': true,
+        'trigger': 'manual',
+        'animation': false,
+    }).on("mouseleave", function () {
+        setTimeout(function () {
+            if (!$(".tooltip:hover").length) {
+                $el.tooltip("hide");
+            }
+        }, 100);
+    });
+}
+
 return {
     parse_email: parse_email,
-    get_image: get_image,
-    get_attachment_url: get_attachment_url,
     do_replace_expressions: do_replace_expressions,
     get_text2html: get_text2html,
     expand_domain: expand_domain,
     breakword: breakword,
+    bindTooltipTo: bindTooltipTo,
 };
 
 });

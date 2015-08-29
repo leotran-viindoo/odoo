@@ -1,26 +1,9 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-Today OpenERP S.A. (<http://openerp.com>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import logging
 
+from openerp import api
 from openerp import SUPERUSER_ID
 from openerp import tools
 from openerp.modules.module import get_module_resource
@@ -32,34 +15,14 @@ _logger = logging.getLogger(__name__)
 
 class hr_employee_category(osv.Model):
 
-    def name_get(self, cr, uid, ids, context=None):
-        if not ids:
-            return []
-        reads = self.read(cr, uid, ids, ['name','parent_id'], context=context)
-        res = []
-        for record in reads:
-            name = record['name']
-            if record['parent_id']:
-                name = record['parent_id'][1]+' / '+name
-            res.append((record['id'], name))
-        return res
-
-    def _name_get_fnc(self, cr, uid, ids, prop, unknow_none, context=None):
-        res = self.name_get(cr, uid, ids, context=context)
-        return dict(res)
-
     _name = "hr.employee.category"
     _description = "Employee Category"
     _columns = {
         'name': fields.char("Employee Tag", required=True),
-        'complete_name': fields.function(_name_get_fnc, type="char", string='Name'),
-        'parent_id': fields.many2one('hr.employee.category', 'Parent Employee Tag', select=True),
-        'child_ids': fields.one2many('hr.employee.category', 'parent_id', 'Child Categories'),
         'employee_ids': fields.many2many('hr.employee', 'employee_category_rel', 'category_id', 'emp_id', 'Employees'),
     }
-
-    _constraints = [
-        (osv.osv._check_recursion, _('Error! You cannot create recursive category.'), ['parent_id'])
+    _sql_constraints = [
+            ('name_uniq', 'unique (name)', "Tag name already exists !"),
     ]
 
 
@@ -141,6 +104,12 @@ class hr_job(osv.Model):
         }, context=context)
         return True
 
+    # TDE note: done in new api, because called with new api -> context is a
+    # frozendict -> error when tryign to manipulate it
+    @api.model
+    def create(self, values):
+        return super(hr_job, self.with_context(mail_create_nosubscribe=True)).create(values)
+
     def copy(self, cr, uid, id, default=None, context=None):
         if default is None:
             default = {}
@@ -183,7 +152,6 @@ class hr_employee(osv.osv):
         'ssnid': fields.char('SSN No', help='Social Security Number'),
         'sinid': fields.char('SIN No', help="Social Insurance Number"),
         'identification_id': fields.char('Identification No'),
-        'otherid': fields.char('Other Id'),
         'gender': fields.selection([('male', 'Male'), ('female', 'Female'), ('other', 'Other')], 'Gender'),
         'marital': fields.selection([('single', 'Single'), ('married', 'Married'), ('widower', 'Widower'), ('divorced', 'Divorced')], 'Marital Status'),
         'department_id': fields.many2one('hr.department', 'Department'),
@@ -254,8 +222,8 @@ class hr_employee(osv.osv):
         address_id = False
         if company:
             company_id = self.pool.get('res.company').browse(cr, uid, company, context=context)
-            address = self.pool.get('res.partner').address_get(cr, uid, [company_id.partner_id.id], ['default'])
-            address_id = address and address['default'] or False
+            address = self.pool.get('res.partner').address_get(cr, uid, [company_id.partner_id.id], ['contact'])
+            address_id = address and address['contact'] or False
         return {'value': {'address_id': address_id}}
 
     def onchange_department_id(self, cr, uid, ids, department_id, context=None):
@@ -265,11 +233,15 @@ class hr_employee(osv.osv):
             value['parent_id'] = department.manager_id.id
         return {'value': value}
 
-    def onchange_user(self, cr, uid, ids, user_id, context=None):
-        work_email = False
+    def onchange_user(self, cr, uid, ids, name, image, user_id, context=None):
         if user_id:
-            work_email = self.pool.get('res.users').browse(cr, uid, user_id, context=context).email
-        return {'value': {'work_email': work_email}}
+            user = self.pool['res.users'].browse(cr, uid, user_id, context=context)
+            values = {
+                'name': name or user.name,
+                'work_email': user.email,
+                'image': image or user.image,
+            }
+            return {'value': values}
 
     def action_follow(self, cr, uid, ids, context=None):
         """ Wrapper because message_subscribe_users take a user_ids=None
@@ -280,15 +252,6 @@ class hr_employee(osv.osv):
         """ Wrapper because message_unsubscribe_users take a user_ids=None
             that receive the context without the wrapper. """
         return self.message_unsubscribe_users(cr, uid, ids, context=context)
-
-    def get_suggested_thread(self, cr, uid, removed_suggested_threads=None, context=None):
-        """Show the suggestion of employees if display_employees_suggestions if the
-        user perference allows it. """
-        user = self.pool.get('res.users').browse(cr, uid, uid, context)
-        if not user.display_employees_suggestions:
-            return []
-        else:
-            return super(hr_employee, self).get_suggested_thread(cr, uid, removed_suggested_threads, context)
 
     def _message_get_auto_subscribe_fields(self, cr, uid, updated_fields, auto_follow_fields=None, context=None):
         """ Overwrite of the original method to always follow user_id field,
@@ -352,6 +315,9 @@ class hr_department(osv.osv):
         return res
 
     def create(self, cr, uid, vals, context=None):
+        if context is None:
+            context = {}
+        context['mail_create_nosubscribe'] = True
         # TDE note: auto-subscription of manager done by hand, because currently
         # the tracking allows to track+subscribe fields linked to a res.user record
         # An update of the limited behavior should come, but not currently done.

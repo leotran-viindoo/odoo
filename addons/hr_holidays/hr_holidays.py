@@ -1,25 +1,7 @@
 # -*- coding: utf-8 -*-
-##################################################################################
-#
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
+
 # Copyright (c) 2005-2006 Axelor SARL. (http://www.axelor.com)
-# and 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-# $Id: hr.py 4656 2006-11-24 09:58:42Z Cyp $
-#
-#     This program is free software: you can redistribute it and/or modify
-#     it under the terms of the GNU Affero General Public License as
-#     published by the Free Software Foundation, either version 3 of the
-#     License, or (at your option) any later version.
-#
-#     This program is distributed in the hope that it will be useful,
-#     but WITHOUT ANY WARRANTY; without even the implied warranty of
-#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#     GNU Affero General Public License for more details.
-#
-#     You should have received a copy of the GNU Affero General Public License
-#     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
 
 
 import calendar
@@ -29,12 +11,11 @@ import logging
 import math
 import time
 from operator import attrgetter
+from werkzeug import url_encode
 
 from dateutil.relativedelta import relativedelta
-import pytz
 
 from openerp.exceptions import UserError, AccessError
-from openerp import SUPERUSER_ID
 from openerp import tools
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
@@ -506,6 +487,37 @@ class hr_holidays(osv.osv):
         elif 'state' in init_values and record.state == 'refuse':
             return 'hr_holidays.mt_holidays_refused'
         return super(hr_holidays, self)._track_subtype(cr, uid, ids, init_values, context=context)
+
+    def _notification_group_recipients(self, cr, uid, ids, message, recipients, done_ids, group_data, context=None):
+        """ Override the mail.thread method to handle HR users and officers
+        recipients. Indeed those will have specific action in their notification
+        emails. """
+        group_hr_user = self.pool['ir.model.data'].xmlid_to_res_id(cr, uid, 'base.group_hr_user')
+        for recipient in recipients:
+            if recipient.id in done_ids:
+                continue
+            if recipient.user_ids and group_hr_user in recipient.user_ids[0].groups_id.ids:
+                group_data['group_hr_user'] |= recipient
+                done_ids.add(recipient.id)
+        return super(hr_holidays, self)._notification_group_recipients(cr, uid, ids, message, recipients, done_ids, group_data, context=context)
+
+    def _notification_get_recipient_groups(self, cr, uid, ids, message, recipients, context=None):
+        res = super(hr_holidays, self)._notification_get_recipient_groups(cr, uid, ids, message, recipients, context=context)
+
+        app_action = '/mail/workflow?%s' % url_encode({'model': self._name, 'res_id': ids[0], 'signal': 'validate'})
+        ref_action = '/mail/workflow?%s' % url_encode({'model': self._name, 'res_id': ids[0], 'signal': 'refuse'})
+
+        holiday = self.browse(cr, uid, ids[0], context=context)
+        actions = []
+        if holiday.state == 'confirm':
+            actions.append({'url': app_action, 'title': 'Approve'})
+        if holiday.state in ['confirm', 'validate', 'validate1']:
+            actions.append({'url': ref_action, 'title': 'Refuse'})
+
+        res['group_hr_user'] = {
+            'actions': actions
+        }
+        return res
 
 
 class resource_calendar_leaves(osv.osv):

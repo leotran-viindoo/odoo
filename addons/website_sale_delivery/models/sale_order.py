@@ -3,6 +3,8 @@
 from openerp.osv import orm, fields
 from openerp import SUPERUSER_ID
 from openerp.addons import decimal_precision
+from openerp.exceptions import ValidationError
+from openerp.tools.translate import _
 
 
 class delivery_carrier(orm.Model):
@@ -13,25 +15,28 @@ class delivery_carrier(orm.Model):
         'website_description': fields.text('Description for Online Quotations'),
     }
     _defaults = {
-        'website_published': True
+        'website_published': False
     }
 
 
 class SaleOrder(orm.Model):
     _inherit = 'sale.order'
 
-    def _amount_all_wrapper(self, cr, uid, ids, field_name, arg, context=None):        
-        """ Wrapper because of direct method passing as parameter for function fields """
-        return self._amount_all(cr, uid, ids, field_name, arg, context=context)
-
-    def _amount_all(self, cr, uid, ids, field_name, arg, context=None):
-        res = super(SaleOrder, self)._amount_all(cr, uid, ids, field_name, arg, context=context)
-        currency_pool = self.pool.get('res.currency')
+    def _amount_delivery(self, cr, uid, ids, field_name, arg, context=None):
+        res = {}
         for order in self.browse(cr, uid, ids, context=context):
-            line_amount = sum([line.price_subtotal for line in order.order_line if line.is_delivery])
-            currency = order.pricelist_id.currency_id
-            res[order.id]['amount_delivery'] = currency_pool.round(cr, uid, currency, line_amount)
+            res[order.id] = {}
+            res[order.id]['amount_delivery'] = sum([line.price_subtotal for line in order.order_line if line.is_delivery])
         return res
+
+    def _has_delivery(self, cr, uid, ids, field_name, arg, context=None):
+        result = dict.fromkeys(ids, False)
+        for so in self.browse(cr, uid, ids, context=context):
+            for line in so.order_line:
+                if line.is_delivery:
+                    result[so.id] = True
+                    break
+        return result
 
     def _get_order(self, cr, uid, ids, context=None):
         result = {}
@@ -41,13 +46,21 @@ class SaleOrder(orm.Model):
 
     _columns = {
         'amount_delivery': fields.function(
-            _amount_all_wrapper, type='float', digits_compute=decimal_precision.get_precision('Account'),
+            _amount_delivery, type='float', digits=0,
             string='Delivery Amount',
             store={
                 'sale.order': (lambda self, cr, uid, ids, c={}: ids, ['order_line'], 10),
                 'sale.order.line': (_get_order, ['price_unit', 'tax_id', 'discount', 'product_uom_qty'], 10),
             },
             multi='sums', help="The amount without tax.", track_visibility='always'
+        ),
+        'has_delivery': fields.function(
+            _has_delivery, type='boolean', string='Has delivery',
+            store={
+                'sale.order': (lambda self, cr, uid, ids, c={}: ids, ['order_line'], 10),
+                'sale.order.line': (_get_order, ['price_unit', 'tax_id', 'discount', 'product_uom_qty'], 10),
+            },
+            help="Has an order line set for delivery"
         ),
         'website_order_line': fields.one2many(
             'sale.order.line', 'order_id',
@@ -97,14 +110,22 @@ class SaleOrder(orm.Model):
         # This can surely be done in a more efficient way, but at the moment, it mimics the way it's
         # done in delivery_set method of sale.py, from delivery module
         for delivery_id in carrier_obj.browse(cr, SUPERUSER_ID, delivery_ids, context=dict(context, order_id=order.id)):
-            if not delivery_id.available:
+            try:
+                if not delivery_id.available:
+                    delivery_ids.remove(delivery_id.id)
+            except ValidationError:
+            # RIM: hack to remove in master, because available field should not depend on a SOAP call to external shipping provider
+            # The validation error is used in backend to display errors in fedex config, but should fail silently in frontend
                 delivery_ids.remove(delivery_id.id)
         return delivery_ids
 
     def _get_errors(self, cr, uid, order, context=None):
         errors = super(SaleOrder, self)._get_errors(cr, uid, order, context=context)
         if not self._get_delivery_methods(cr, uid, order, context=context):
-            errors.append(('No delivery method available', 'There is no available delivery method for your order'))            
+            errors.append(
+                (_('Sorry, we are unable to ship your order'),
+                 _('No shipping method is available for your current order and shipping address. '
+                   'Please contact us for more information.')))
         return errors
 
     def _get_website_data(self, cr, uid, order, context=None):
@@ -123,4 +144,16 @@ class SaleOrder(orm.Model):
         delivery_ids = self._get_delivery_methods(cr, uid, order, context=context)
 
         values['deliveries'] = DeliveryCarrier.browse(cr, SUPERUSER_ID, delivery_ids, context=delivery_ctx)
+        return values
+
+    def _cart_update(self, cr, uid, ids, product_id=None, line_id=None, add_qty=0, set_qty=0, context=None, **kwargs):
+        """ Override to update carrier quotation if quantity changed """
+
+        values = super(SaleOrder, self)._cart_update(
+            cr, uid, ids, product_id, line_id, add_qty, set_qty, context, **kwargs)
+
+        if add_qty or set_qty is not None:
+            for sale_order in self.browse(cr, uid, ids, context=context):
+                self._check_carrier_quotation(cr, uid, sale_order, context=context)
+
         return values

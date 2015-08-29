@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
@@ -30,14 +12,13 @@ class procurement_order(osv.osv):
     }
 
     def _is_procurement_task(self, cr, uid, procurement, context=None):
-        return procurement.product_id.type == 'service' and procurement.product_id.auto_create_task or False
+        return procurement.product_id.type == 'service' and procurement.product_id.track_service=='task' or False
 
     def _assign(self, cr, uid, procurement, context=None):
         res = super(procurement_order, self)._assign(cr, uid, procurement, context=context)
         if not res:
             #if there isn't any specific procurement.rule defined for the product, we may want to create a task
-            if self._is_procurement_task(cr, uid, procurement, context=context):
-                return True
+            return self._is_procurement_task(cr, uid, procurement, context=context)
         return res
 
     def _run(self, cr, uid, procurement, context=None):
@@ -138,18 +119,4 @@ class project_task(osv.osv):
                 self._validate_subflows(cr, uid, ids, context=context)
         return res
 
-class product_template(osv.osv):
-    _inherit = "product.template"
-    _columns = {
-        'project_id': fields.many2one('project.project', 'Project', ondelete='set null',),
-        'auto_create_task': fields.boolean('Create Task Automatically', help="Tick this option if you want to create a task automatically each time this product is sold"),
-    }
 
-class product_product(osv.osv):
-    _inherit = "product.product"
-    
-    def need_procurement(self, cr, uid, ids, context=None):
-        for product in self.browse(cr, uid, ids, context=context):
-            if product.type == 'service' and product.auto_create_task:
-                return True
-        return super(product_product, self).need_procurement(cr, uid, ids, context=context)
