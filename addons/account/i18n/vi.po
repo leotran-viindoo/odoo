@@ -7282,7 +7282,7 @@ msgstr "Dấu trên báo cáo"
 #. module: account
 #: model:ir.ui.view,arch_db:account.account_planner
 msgid "Simplify your cash, checks, or credit cards deposits with an integrated batch payment function."
-msgstr "Simplify your cash, checks, or credit cards deposits with an integrated batch payment function."
+msgstr "Chức năng thanh toán hàng loạt được tích hợp để đơn giản hóa giao dịch tiền mặt, séc hoặc thẻ tín dụng."
 
 #. module: account
 #: selection:account.financial.report,style_overwrite:0
